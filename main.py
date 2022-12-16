@@ -48,7 +48,7 @@ global p1, p2
 global lineup, discard_slot  # discard slot: slot displaying the top card of the discard pile
 global curr_player, game_winner  # curr player: player who can take actions
 global turn_change_counter, end_game_counter  # to count down how long text appears on the screen
-global curr_screen, screen_counter, display_discard
+global curr_screen, screen_counter, display_discard, card_trashed, return_function
 # curr_screen: whether a player has to choose to discard cards, replace the lineup, etc., or if they can currently buy
 # cards and take actions
 # screen_counter: number of cards to be discarded/trashed until we go back to the default screen
@@ -206,7 +206,16 @@ class Card:
 
     # define this in subclasses
     def take_effect(self):
-        pass
+        if self.type == "innovation":
+            empty_slot = False
+            for slot in self.player.loc_list:
+                if slot.card is None:
+                    slot.card = self
+                    empty_slot = True
+                    break
+
+            if not empty_slot:
+                pass  # player has to select a innovation to replace
 
     def discard(self):
         global screen_counter
@@ -222,22 +231,31 @@ class Card:
         global deck
         global trash_pile
         global curr_screen
+        global card_trashed
 
         print("trashing card: " + str(self) + ", trash counter: " + str(screen_counter))
         # print("curr_screen: " + str(curr_screen))
 
+        # store the trashed card for functions that need it
+        card_trashed = self
+
         # if we trash cards from different places, put that here
+        # remove the card from the hand, deck, and/or discard pile
         if self.player is not None:
             if self in self.player.hand:
                 self.player.hand.remove(self)
             if self in self.player.discard_pile:
                 self.player.discard_pile.remove(self)
+                if self == discard_slot.card:
+                    discard_slot.card = None
+                    # todo: update discard slot to a different card
         if self in deck:
             deck.remove(self)
 
         trash_pile.append(self)
         self.button = None
 
+        # decrement the "number of cards to be trashed"
         screen_counter -= 1
 
 
@@ -274,9 +292,16 @@ class Sacrifice(Card):
         super().__init__("regular", 2, 0)
 
     def take_effect(self):
+        global return_function
+
         self.player.draw_card()
         self.player.trash_cards(1)
-        # todo: edit text (if you trashed an action, draw 2)
+        # when the trashing is done, check if the trashed card was an action
+        return_function = self.draw_condition
+
+    def draw_condition(self):
+        if card_trashed.type == "action":
+            self.player.draw_cards(2)
 
 
 class Scrap(Card):
@@ -343,15 +368,7 @@ class Spyglass(Card):
         super().__init__("innovation", 2, 0)
 
     def take_effect(self):
-        empty_slot = False
-        for slot in self.player.loc_list:
-            if slot.card is None:
-                slot.card = self
-                empty_slot = True
-                break
-
-        if not empty_slot:
-            pass  # player has to select a innovation to replace
+        super().take_effect()
 
 
 class AppliedReconnaissance(Card):
@@ -373,10 +390,11 @@ class ReadTheMaps(Card):
 
 class Jinx(Card):
     def __init__(self):
-        super().__init__("regular", 0, 0)
+        super().__init__("regular", 1, 0)
 
     def take_effect(self):
-        # TODO: give op 2 spaces
+        # add a space to the opponent's deck
+        self.player.opponent.deck.append(Space(self.player.opponent))
         self.trash()
 
 
@@ -433,6 +451,10 @@ class Player:
             # this works don't question it
             if self.hand[c].player is None:
                 raise Exception
+
+    def draw_cards(self, num):
+        for i in range(num):
+            self.draw_card()
 
     def draw_card(self):
         global curr_player
@@ -770,6 +792,9 @@ def start_game():
     for i in range(4):
         deck.append(Spyglass())
 
+    for i in range(4):
+        deck.append(Sacrifice())
+
     lineup = [Slot(0, 2, pygame.Rect((LINEUP_X_START, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
               Slot(0, 100, pygame.Rect((LINEUP_X_START + SLOT_WIDTH, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
               Slot(3, 6, pygame.Rect((LINEUP_X_START + (SLOT_WIDTH * 2), LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
@@ -836,7 +861,7 @@ def handle_events():
                     display_discard = False
 
                 if curr_screen == "trash":
-                    print("trashing in from discard pile")
+                    # print("trashing from discard pile")
                     for card in curr_player.discard_pile:
                         card.select_button.check_event(e)
 
@@ -936,7 +961,10 @@ def update():
         if screen_counter == 0 and (curr_screen == "discard" or curr_screen == "trash"):
             curr_screen = "default"
             display_discard = False
-            # print("returning to default screen")
+
+            if return_function is not None:
+                return_function()
+            print("returning to default screen")
 
 
 # display text and buttons
