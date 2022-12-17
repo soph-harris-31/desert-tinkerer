@@ -52,18 +52,33 @@ global curr_screen, screen_counter, display_discard, card_trashed, return_functi
 # curr_screen: whether a player has to choose to discard cards, replace the lineup, etc., or if they can currently buy
 # cards and take actions
 # screen_counter: number of cards to be discarded/trashed until we go back to the default screen
+# display_discard: true if the discard pile is currently being displayed (when the user clicks on it)
+# card_trashed: when a card is trashed, this variable stores the card
+# return function: sometimes a function has to be called after a card is trashed; if so, that function is stored here
 global trash_pile
 global deck
+global log
+# log of game events
+# format: list of lists of tuples; one list for each turn, and one tuple for each event
+# (event type, card involved, player, [targets])
+# event type: buy, 'play' for card played, or ability
 
 
 # to do later: re-implement 2-player play (discard slot corresponds to the current player)
 # TODO: implement innovations
 # TODO: card text on mouse over
 
+# log functions
+
+
 def end_turn():
     global curr_player
+    global log
 
     curr_player.pass_turn()
+
+    # separate the new turn in the log
+    log.append([])
 
 
 def fill_lineup():
@@ -159,6 +174,7 @@ class Card:
     def buy(self):
         global curr_player
         global lineup
+        global log
 
         # print("card object: " + str(self))
         # print("name: " + self.name)
@@ -176,6 +192,8 @@ class Card:
 
             self.slot.remove()
             self.slot = None
+
+        log[-1].append(('buy', self, curr_player, []))
 
     def add(self, slot):
         self.slot = slot
@@ -204,7 +222,6 @@ class Card:
         else:
             print("stop playing my cards its not your turn")
 
-    # define this in subclasses
     def take_effect(self):
         if self.type == "innovation":
             empty_slot = False
@@ -271,7 +288,7 @@ class Crystal(Card):
 
 class Barter(Card):
     def __init__(self):
-        super().__init__("regular", 2, 0)
+        super().__init__("action", 2, 0)
 
     def take_effect(self):
         self.player.draw_card()
@@ -281,7 +298,7 @@ class Barter(Card):
 
 class Catalyst(Card):
     def __init__(self):
-        super().__init__("regular", 2, 1)
+        super().__init__("action", 2, 1)
 
     def take_effect(self):
         self.player.actions += 2
@@ -289,7 +306,7 @@ class Catalyst(Card):
 
 class Sacrifice(Card):
     def __init__(self):
-        super().__init__("regular", 2, 0)
+        super().__init__("action", 2, 0)
 
     def take_effect(self):
         global return_function
@@ -300,13 +317,15 @@ class Sacrifice(Card):
         return_function = self.draw_condition
 
     def draw_condition(self):
-        if card_trashed.type == "action":
+        # print("draw condition")
+        if card_trashed.type == "action" or card_trashed.type == "innovation":
+            # print("gottem")
             self.player.draw_cards(2)
 
 
 class Scrap(Card):
     def __init__(self):
-        super().__init__("regular", 2, 1)
+        super().__init__("action", 2, 1)
 
     def take_effect(self):
         self.player.trash_cards(1)
@@ -314,7 +333,7 @@ class Scrap(Card):
 
 class FavorableExchange(Card):
     def __init__(self):
-        super().__init__("regular", 5, 2)
+        super().__init__("action", 5, 2)
 
     def take_effect(self):
         self.player.draw_card()
@@ -322,7 +341,7 @@ class FavorableExchange(Card):
 
 class HiredBandit(Card):
     def __init__(self):
-        super().__init__("regular", 7, 2)
+        super().__init__("action", 7, 2)
 
     def take_effect(self):
         self.player.get_card(4)
@@ -347,7 +366,7 @@ class Pistol(Card):
 
 class FuelCell(Card):
     def __init__(self):
-        super().__init__("regular", 3, 2)
+        super().__init__("action", 3, 2)
 
     def take_effect(self):
         pass
@@ -373,7 +392,7 @@ class Spyglass(Card):
 
 class AppliedReconnaissance(Card):
     def __init__(self):
-        super().__init__("regular", 2, 0)
+        super().__init__("action", 2, 0)
 
     def take_effect(self):
         pass
@@ -381,16 +400,43 @@ class AppliedReconnaissance(Card):
 
 class ReadTheMaps(Card):
     def __init__(self):
-        super().__init__("regular", 4, 0)
+        super().__init__("action", 4, 0)
 
+    # execute card text:
+    # if you've played a 2- cost card this turn, draw a card
+    # if you've played a 3-6 cost card this turn, draw a card
+    # if you've played a 7+ cost card this turn, draw a card
     def take_effect(self):
-        pass
-        # TODO: draw cards on conditions
+        global log
+
+        cost0_2 = False
+        cost3_6 = False
+        cost7_10 = False
+
+        turn_events = log[-1]  # everything that happened this turn
+        for i in range(len(turn_events)):
+            event = turn_events[i]
+            if event[0] == 'play':  # if this event was a card play
+                if event[1].cost <= 2:
+                    cost0_2 = True
+                elif event[1].cost <= 6:
+                    cost3_6 = True
+                else:
+                    cost7_10 = True
+            if cost0_2 and cost3_6 and cost7_10:
+                break
+
+        if cost0_2:
+            self.player.draw_card()
+        if cost3_6:
+            self.player.draw_card()
+        if cost7_10:
+            self.player.draw_card()
 
 
 class Jinx(Card):
     def __init__(self):
-        super().__init__("regular", 1, 0)
+        super().__init__("action", 1, 0)
 
     def take_effect(self):
         # add a space to the opponent's deck
@@ -540,6 +586,8 @@ class Player:
         self.power -= card.cost
 
     def play(self, card):
+        global log
+
         if card.type != "basic" and card.type != "innovation":
             self.actions -= 1
 
@@ -556,6 +604,8 @@ class Player:
             card.button = Button(rect, function, color=SLOT_COLOR, text=str(card))
 
         self.update_hand()  # since we removed a card from the hand, we need to update the visuals
+
+        log[-1].append(('play', self, card, []))
 
     def get_card(self, num):
         global deck
@@ -759,42 +809,48 @@ def start_game():
     global yes_button
     global no_button
     global trash_pile
+    global return_function
+    global log
 
     status = "game"
 
     # add the cards to the communal deck
     deck = []
 
-    for i in range(4):
+    for i in range(1):
         deck.append(Barter())
 
-    for i in range(8):
+    for i in range(5):
         deck.append(Scrap())
 
-    for i in range(6):
+    for i in range(1):
         deck.append(FavorableExchange())
 
-    for i in range(3):
+    for i in range(1):
         deck.append(HiredBandit())
 
-    for i in range(3):
+    for i in range(1):
         deck.append(WeaponHeist())
 
-    for i in range(4):
+    for i in range(1):
         deck.append(Pistol())
 
-    for i in range(6):
+    for i in range(5):
         deck.append(FuelCell())
 
-    for i in range(3):
+    for i in range(1):
         deck.append(MakeshiftBarrier())
 
-    for i in range(4):
+    for i in range(1):
         deck.append(Spyglass())
 
-    for i in range(4):
+    for i in range(1):
         deck.append(Sacrifice())
 
+    for i in range(10):
+        deck.append(ReadTheMaps())
+
+    # the lineup contains 6 slots, some of which will reliably have cards of certain costs.
     lineup = [Slot(0, 2, pygame.Rect((LINEUP_X_START, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
               Slot(0, 100, pygame.Rect((LINEUP_X_START + SLOT_WIDTH, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
               Slot(3, 6, pygame.Rect((LINEUP_X_START + (SLOT_WIDTH * 2), LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
@@ -816,6 +872,7 @@ def start_game():
     p1.opponent = p2
     p2.opponent = p1
 
+    # randomly determine starting player
     starting_player = random.randrange(1)
 
     if starting_player == 0:
@@ -827,6 +884,10 @@ def start_game():
 
     yes_button = Button(YES_RECT, yes_replace, color=(0, 100, 0), text="yes")
     no_button = Button(NO_RECT, new_turn, color=(100, 0, 0), text="no")
+
+    return_function = None
+
+    log = [[]]
 
 
 # check for clicks
@@ -856,6 +917,8 @@ def handle_events():
             if display_discard:
                 # print("clicky")
                 display_rect = pygame.Rect(DISPLAY_DISCARD)
+
+                # if the player clicks outside the display discard window, close the window
                 if e.type == pygame.MOUSEBUTTONUP and not display_rect.collidepoint(e.pos):
                     print("exiting display discard")
                     display_discard = False
@@ -963,6 +1026,7 @@ def update():
             display_discard = False
 
             if return_function is not None:
+                print("executing return function")
                 return_function()
             print("returning to default screen")
 
