@@ -58,10 +58,12 @@ global curr_screen, screen_counter, display_discard, card_trashed, return_functi
 global trash_pile
 global deck
 global log
+
+
 # log of game events
 # format: list of lists of tuples; one list for each turn, and one tuple for each event
 # (event type, card involved, player, [targets])
-# event type: buy, 'play' for card played, or ability
+# event type: 'buy', 'play' for card played, or 'ability'
 
 
 # to do later: re-implement 2-player play (discard slot corresponds to the current player)
@@ -85,23 +87,20 @@ def fill_lineup():
     global lineup
     global deck
 
-    d = 0
-
     for c in range(len(lineup)):
         if len(deck) == 0:
             end_game()
 
-        lineup[c].add_card()
-        # remove the card from the deck and add it to the lineup
-
-        d += 1
-        d %= len(deck)
+        else:
+            lineup[c].add_card()
+            # remove the card from the deck and add it to the lineup
 
 
 def yes_replace():
     for slot in lineup:
-        deck.append(slot.card)
-        slot.card = None
+        if slot.card is not None:
+            deck.append(slot.card)
+            slot.card = None
 
     fill_lineup()
     new_turn()
@@ -465,7 +464,6 @@ class Player:
                          Slot(0, 100, pygame.Rect(LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT)),
                          Slot(0, 100, pygame.Rect(LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT))]
         self.discard_pile = []
-        self.played = []  # card played this turn, get discarded at the end of the turn
         random.shuffle(self.deck)
         self.is_p1 = player_num % 2
 
@@ -508,21 +506,23 @@ class Player:
         if len(self.deck) == 0:
             self.shuffle_discard()
 
-        card = self.deck.pop()
+        if len(self.deck) != 0:
+            card = self.deck.pop()
 
-        hand_size = len(self.hand)
+            hand_size = len(self.hand)
 
-        self.hand.append(card)
+            self.hand.append(card)
 
-        try:
-            if self == curr_player:
+            try:
+                if self == curr_player:
+                    card.button = Button((WIDTH / 2 + (SLOT_WIDTH * (hand_size / 2.0 - 0.5)),
+                                          HAND_Y_LOC, SLOT_WIDTH, SLOT_HEIGHT), card.play, color=SLOT_COLOR,
+                                         text=str(card))
+                    self.update_hand()
+            except NameError:
                 card.button = Button((WIDTH / 2 + (SLOT_WIDTH * (hand_size / 2.0 - 0.5)),
                                       HAND_Y_LOC, SLOT_WIDTH, SLOT_HEIGHT), card.play, color=SLOT_COLOR, text=str(card))
                 self.update_hand()
-        except NameError:
-            card.button = Button((WIDTH / 2 + (SLOT_WIDTH * (hand_size / 2.0 - 0.5)),
-                                  HAND_Y_LOC, SLOT_WIDTH, SLOT_HEIGHT), card.play, color=SLOT_COLOR, text=str(card))
-            self.update_hand()
 
     def shuffle_discard(self):
         global discard_slot
@@ -535,6 +535,7 @@ class Player:
             discard_slot.card = None
 
     def pass_turn(self):
+        global log
         global screen
         global turn_change_counter
         global curr_screen
@@ -543,13 +544,13 @@ class Player:
         # print("starting turn of: " + str(self.opponent))
 
         # all cards played this turn and all cards left in hand go to the discard pile
-        for card in self.played:
-            self.add_to_discard(card)
+        for element in log[-1]:
+            if element[0] == 'play' and element[1].type != "innovation":
+                self.add_to_discard(element[1])
         for card in self.hand:
             self.add_to_discard(card)
 
         self.hand = []
-        self.played = []
         self.power = 0
 
         # draw a new hand of 5
@@ -595,7 +596,6 @@ class Player:
 
         self.power += card.power
         self.hand.remove(card)
-        self.played.append(card)
 
         if card.type == "innovation":
             function = None  # this should be defined when the innovation is constructed
@@ -605,7 +605,7 @@ class Player:
 
         self.update_hand()  # since we removed a card from the hand, we need to update the visuals
 
-        log[-1].append(('play', self, card, []))
+        log[-1].append(('play', card, self, []))
 
     def get_card(self, num):
         global deck
@@ -702,6 +702,11 @@ class Slot:
         c = 0
         while not added and c < len(deck):
             card = deck[c]
+            if card is None:
+                print("index: " + str(c))
+                print("deck length: " + str(len(deck)))
+                for i in range(len(deck)):
+                    print(deck[i])
             if self.min <= card.cost <= self.max:
                 self.card = card
                 card.add(self)
@@ -814,41 +819,47 @@ def start_game():
 
     status = "game"
 
+    # define the players
+    p1 = Player(1)
+    p2 = Player(2)
+    p1.opponent = p2
+    p2.opponent = p1
+
     # add the cards to the communal deck
     deck = []
 
-    for i in range(1):
+    for i in range(6):
         deck.append(Barter())
-
-    for i in range(5):
-        deck.append(Scrap())
-
-    for i in range(1):
-        deck.append(FavorableExchange())
-
-    for i in range(1):
-        deck.append(HiredBandit())
-
-    for i in range(1):
-        deck.append(WeaponHeist())
-
-    for i in range(1):
-        deck.append(Pistol())
-
+    #
+    # for i in range(5):
+    #     deck.append(Scrap())
+    #
+    # for i in range(1):
+    #     deck.append(FavorableExchange())
+    #
+    # for i in range(1):
+    #     deck.append(HiredBandit())
+    #
+    # for i in range(1):
+    #     deck.append(WeaponHeist())
+    #
+    # for i in range(1):
+    #     deck.append(Pistol())
+    #
     for i in range(5):
         deck.append(FuelCell())
-
-    for i in range(1):
-        deck.append(MakeshiftBarrier())
-
-    for i in range(1):
-        deck.append(Spyglass())
-
-    for i in range(1):
-        deck.append(Sacrifice())
-
-    for i in range(10):
-        deck.append(ReadTheMaps())
+    #
+    # for i in range(1):
+    #     deck.append(MakeshiftBarrier())
+    #
+    # for i in range(1):
+    #     deck.append(Spyglass())
+    #
+    # for i in range(1):
+    #     deck.append(Sacrifice())
+    #
+    # for i in range(7):
+    #     deck.append(ReadTheMaps())
 
     # the lineup contains 6 slots, some of which will reliably have cards of certain costs.
     lineup = [Slot(0, 2, pygame.Rect((LINEUP_X_START, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
@@ -866,11 +877,6 @@ def start_game():
     random.shuffle(deck)
 
     fill_lineup()
-
-    p1 = Player(1)
-    p2 = Player(2)
-    p1.opponent = p2
-    p2.opponent = p1
 
     # randomly determine starting player
     starting_player = random.randrange(1)
