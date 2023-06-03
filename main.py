@@ -281,9 +281,6 @@ class Card:
         global curr_screen
         global card_trashed
 
-        # print("trashing card: " + str(self) + ", trash counter: " + str(screen_counter))
-        # print("curr_screen: " + str(curr_screen))
-
         # store the trashed card for functions that need it
         card_trashed = self
 
@@ -302,6 +299,7 @@ class Card:
 
         trash_pile.append(self)
         self.button = None
+        self.player.update_hand()
 
         # decrement the "number of cards to be trashed"
         screen_counter -= 1
@@ -555,7 +553,6 @@ class Player:
 
     # update the buttons of the cards in hand so they are centered on the screen.
     # called from the self.draw_card and self.play_card functions.
-    # todo: call when a card in trashed
     def update_hand(self):
         hand_size = len(self.hand)
 
@@ -839,11 +836,26 @@ def end_game():
     end_game_text_counter = 70
 
 
+# called from initialize
+def create_screen():
+    global screen
+
+    screen = pygame.display.set_mode([500, 500])
+    screen.fill((0, 0, 0))
+
+
+# called from initialize
+def create_start_button():
+    global start_button
+
+    # button you click to start the game
+    start_button = Button((0, 0, 350, 100), start_game, color=(100, 30, 0), text="Play!")
+    start_button.rect.center = (screen.get_rect().centerx, screen.get_rect().centery)
+
+
 def initialize():
     global running
     global status
-    global start_button
-    global screen
     global turn_change_text_counter
     global end_game_text_counter
     global screen_counter
@@ -856,14 +868,13 @@ def initialize():
     status = "home"
     running = True
 
-    screen = pygame.display.set_mode([500, 500])
-    screen.fill((0, 0, 0))
+    create_screen()
 
     pygame.display.set_mode((WIDTH, HEIGHT))
 
-    start_button = Button((0, 0, 350, 100), start_game, color=(100, 30, 0), text="Play!")
-    start_button.rect.center = (screen.get_rect().centerx, screen.get_rect().centery)
+    create_start_button()
 
+    # todo: move to start game
     turn_change_text_counter = 0
     end_game_text_counter = 0
     screen_counter = 0
@@ -887,31 +898,11 @@ def key_up(key):
             end_turn()
 
 
-def start_game():
-    global status
-    global p1
-    global p2
+# add the cards to the communal deck
+# called from start_game
+def fill_deck():
     global deck
-    global lineup
-    global curr_player
-    global screen
-    global discard_slot
-    global pass_button
-    global yes_button
-    global no_button
-    global trash_pile
-    global return_function
-    global log
 
-    status = "game"
-
-    # define the players
-    p1 = Player(1)
-    p2 = Player(2)
-    p1.opponent = p2
-    p2.opponent = p1
-
-    # add the cards to the communal deck
     deck = []
 
     for i in range(6):
@@ -947,6 +938,12 @@ def start_game():
     for i in range(7):
         deck.append(ReadTheMaps())
 
+
+# called from start_game
+def create_slots():
+    global lineup
+    global discard_slot
+
     # the lineup contains 6 slots, some of which will reliably have cards of certain costs.
     lineup = [Slot(0, 2, pygame.Rect((LINEUP_X_START, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
               Slot(0, 100, pygame.Rect((LINEUP_X_START + SLOT_WIDTH, LINEUP_Y, SLOT_WIDTH, SLOT_HEIGHT))),
@@ -958,11 +955,47 @@ def start_game():
     discard_slot = Slot(0, 100, pygame.Rect(DISCARD_PILE_LOC[0], DISCARD_PILE_LOC[1], HAND_CARD_DIMS[0],
                                             HAND_CARD_DIMS[1]))
 
+
+# called from start_game
+def init_buttons():
+    global pass_button
+    global yes_button
+    global no_button
+
+    # button to pass the turn
+    pass_button = Button(END_TURN_RECT, end_turn, color=(100, 70, 0), text="End Turn")
+    # these buttons appear when asked to replace the lineup
+    yes_button = Button(YES_RECT, yes_replace, color=(0, 100, 0), text="yes")
+    no_button = Button(NO_RECT, new_turn, color=(100, 0, 0), text="no")
+
+
+def start_game():
+    global status
+    global p1
+    global p2
+    global curr_player
+    global screen
+    global trash_pile
+    global return_function
+    global log
+
+    status = "game"
+
+    # define the players
+    p1 = Player(1)
+    p2 = Player(2)
+    p1.opponent = p2
+    p2.opponent = p1
+
+    fill_deck()
+
     trash_pile = []
 
     random.shuffle(deck)
 
     fill_lineup()
+    create_slots()
+    init_buttons()
 
     # randomly determine starting player
     starting_player = random.randrange(1)
@@ -972,14 +1005,92 @@ def start_game():
     else:
         curr_player = p2
 
-    pass_button = Button(END_TURN_RECT, end_turn, color=(100, 70, 0), text="End Turn")
-
-    yes_button = Button(YES_RECT, yes_replace, color=(0, 100, 0), text="yes")
-    no_button = Button(NO_RECT, new_turn, color=(100, 0, 0), text="no")
-
     return_function = None
 
     log = [[]]
+
+
+def display_discard_events(e):
+    global display_discard
+
+    # print("clicky")
+    display_rect = pygame.Rect(DISPLAY_DISCARD)
+
+    # if the player clicks outside the display discard window, close the window
+    if e.type == pygame.MOUSEBUTTONUP and not display_rect.collidepoint(e.pos):
+        print("exiting display discard")
+        display_discard = False
+
+    if curr_screen == "trash":
+        # print("trashing from discard pile")
+        for card in curr_player.discard_pile:
+            card.select_button.check_event(e)
+
+
+def default_screen_events(e):
+    for slot in lineup:
+        if slot.card is not None:
+            slot.card.button.check_event(e)
+        # if slot == lineup[0]:
+        #     print("checking events")
+    for card in curr_player.hand:
+        card.button.check_event(e)
+
+    if discard_slot.card is not None:
+        # print("discard slot card: " + str(discard_slot.card))
+        # print("function: " + str(discard_slot.card.button.function))
+        if discard_slot.card.button.function is not None:
+            discard_slot.card.button.check_event(e)
+
+        # if e.type == pygame.MOUSEBUTTONUP:
+        #     print("button: " + str(discard_slot.card.button))
+        #     print("function: " + str(discard_slot.card.button.function))
+
+    pass_button.check_event(e)
+
+
+def trash_screen_events(e):
+    for card in curr_player.hand:
+        card.select_button.check_event(e)
+    for card in curr_player.discard_pile:
+        card.select_button.check_event(e)
+        # print("card name: " + str(card))
+
+    if discard_slot.card is not None:
+        # print("discard slot card: " + str(discard_slot.card))
+        # print("function: " + str(discard_slot.card.button.function))
+        if discard_slot.card.button.function is not None:
+            discard_slot.card.button.check_event(e)
+
+
+# handle events when the game is happening
+# called from handle_events
+def in_game_events(e):
+    global display_discard
+    global status
+    global yes_button
+    global no_button
+    global curr_screen
+
+    if display_discard:
+        display_discard_events(e)
+
+    elif curr_screen == "default":
+        default_screen_events(e)
+    # if e.type == pygame.MOUSEBUTTONUP:
+    #     print("function: " + str(pass_button.function))
+
+    elif curr_screen == "replace":
+        yes_button.check_event(e)
+        no_button.check_event(e)
+
+    elif curr_screen == "discard":
+        # TODO: change to accommodate curr player discard
+        for card in curr_player.opponent.hand:
+            card.select_button.check_event(e)
+
+    elif curr_screen == "trash":
+        trash_screen_events(e)
 
 
 # check for clicks
@@ -987,11 +1098,6 @@ def handle_events():
     global running
     global lineup
     global status
-    global p1
-    global p2
-    global yes_button
-    global no_button
-    global display_discard
 
     for e in pygame.event.get():
         if e.type == pygame.QUIT:  # when you click x, exit the program
@@ -1006,65 +1112,7 @@ def handle_events():
             start_button.check_event(e)
 
         if status == "game":
-            if display_discard:
-                # print("clicky")
-                display_rect = pygame.Rect(DISPLAY_DISCARD)
-
-                # if the player clicks outside the display discard window, close the window
-                if e.type == pygame.MOUSEBUTTONUP and not display_rect.collidepoint(e.pos):
-                    print("exiting display discard")
-                    display_discard = False
-
-                if curr_screen == "trash":
-                    # print("trashing from discard pile")
-                    for card in curr_player.discard_pile:
-                        card.select_button.check_event(e)
-
-            elif curr_screen == "default":
-                for slot in lineup:
-                    if slot.card is not None:
-                        slot.card.button.check_event(e)
-                    # if slot == lineup[0]:
-                    #     print("checking events")
-                for card in curr_player.hand:
-                    card.button.check_event(e)
-
-                if discard_slot.card is not None:
-                    # print("discard slot card: " + str(discard_slot.card))
-                    # print("function: " + str(discard_slot.card.button.function))
-                    if discard_slot.card.button.function is not None:
-                        discard_slot.card.button.check_event(e)
-
-                    # if e.type == pygame.MOUSEBUTTONUP:
-                    #     print("button: " + str(discard_slot.card.button))
-                    #     print("function: " + str(discard_slot.card.button.function))
-
-                pass_button.check_event(e)
-
-            # if e.type == pygame.MOUSEBUTTONUP:
-            #     print("function: " + str(pass_button.function))
-
-            elif curr_screen == "replace":
-                yes_button.check_event(e)
-                no_button.check_event(e)
-
-            elif curr_screen == "discard":
-                # TODO: change to accommodate curr player discard
-                for card in curr_player.opponent.hand:
-                    card.select_button.check_event(e)
-
-            elif curr_screen == "trash":
-                for card in curr_player.hand:
-                    card.select_button.check_event(e)
-                for card in curr_player.discard_pile:
-                    card.select_button.check_event(e)
-                    # print("card name: " + str(card))
-
-                if discard_slot.card is not None:
-                    # print("discard slot card: " + str(discard_slot.card))
-                    # print("function: " + str(discard_slot.card.button.function))
-                    if discard_slot.card.button.function is not None:
-                        discard_slot.card.button.check_event(e)
+            in_game_events(e)
 
 
 # update the game elements each frame
