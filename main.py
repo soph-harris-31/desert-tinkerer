@@ -46,7 +46,7 @@ POWER_FONT_SIZE = 32
 
 INNOV_SLOT_HEIGHT = SLOT_HEIGHT
 INNOV_SLOT_WIDTH = int(SLOT_WIDTH)
-INNOV_SLOT_X = LINEUP_X_START
+INNOV_SLOT_X_START = int(WIDTH / 2 - INNOV_SLOT_WIDTH*2 - CUSHION*2)
 INNOV_SLOT_Y = LINEUP_Y + SLOT_HEIGHT + CUSHION
 
 SELECT_Y = 260
@@ -205,7 +205,7 @@ class Card:
         self.vps = self.cost / 2  # how many victory points this card gives at the end of the game
 
     def __str__(self):
-        return type(self).__name__  # make customizable
+        return type(self).__name__
 
     # the current player buys this card, calling the player.buy function.
     # called when this card is clicked on in the lineup.
@@ -236,7 +236,7 @@ class Card:
 
     # add this card to a slot in the lineup.
     # called from the slot.add_card function.
-    def add(self, slot, func=buy):
+    def add(self, slot, func):
         self.slot = slot
         # create a new button which will cause the player to buy this card when it is clicked on
         self.button = Button(slot.rect, func, color=SLOT_COLOR, text=str(self))
@@ -258,6 +258,8 @@ class Card:
                 play_valid = False
 
             if play_valid:
+                if self.type == "innovation":
+                    pass
                 player.play(self)
                 self.take_effect()
 
@@ -270,18 +272,7 @@ class Card:
     # is overwritten in the corresponding subclass.
     # called from the self.play function
     def take_effect(self):
-        if self.type == "innovation":
-            empty_slot = False
-            # find an empty slot to put the innovation
-            for slot in self.player.innov_list:
-                if slot.card is None:
-                    slot.card = self
-                    self.add(slot, func=self.ability)
-                    empty_slot = True
-                    break
-
-            if not empty_slot:
-                pass  # player has to select a innovation to replace
+        pass
 
     # remove this card from the hand and add it to the discard pile.
     # called when the player clicks on this card from the discard screen (prompted by a card's effect)
@@ -345,6 +336,19 @@ class Innovation(Card):
         super().__init__("innovation", cost, 0)
         self.ability = ability
         self.passive = passive
+
+    def take_effect(self):
+        empty_slot = False
+        # find an empty slot to put the innovation
+        for slot in self.player.innov_list:
+            if slot.card is None:
+                slot.card = self
+                self.add(slot, self.ability)
+                empty_slot = True
+                break
+
+        if not empty_slot:
+            print("no empty slots")  # player has to select -a innovation to replace
 
 
 # basic card that starts in the player's hand
@@ -482,18 +486,16 @@ class MakeshiftBarrier(Card):
 # card text:
 # You may look at and buy the top card of the main deck.
 # Destroy this innovation to draw a card.
-class Spyglass(Innovation
-               ):
+class Spyglass(Innovation):
     def __init__(self):
         super().__init__(2, self.ability, self.passive)
 
-    def take_effect(self):
-        pass
-
+    # Destroy this innovation to draw a card.
     def ability(self):
         self.destroy()
         self.player.draw_card()
 
+    # You may look at and buy the top card of the main deck.
     def passive(self):
         pass
 
@@ -579,12 +581,14 @@ class Player:
                      Crystal(self), Crystal(self), Crystal(self)]
 
         # list of slots that can contain innovations.
-        self.innov_list = [Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
-                            INNOV_SLOT_HEIGHT)),
-                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
-                            INNOV_SLOT_HEIGHT)),
-                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
-                            INNOV_SLOT_HEIGHT))]
+        self.innov_list = [Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X_START, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
+                                                            INNOV_SLOT_HEIGHT)),
+                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X_START+SLOT_WIDTH+CUSHION, INNOV_SLOT_Y,
+                                                            INNOV_SLOT_WIDTH, INNOV_SLOT_HEIGHT)),
+                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X_START+SLOT_WIDTH*2+CUSHION*2, INNOV_SLOT_Y,
+                                                            INNOV_SLOT_WIDTH, INNOV_SLOT_HEIGHT)),
+                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X_START+SLOT_WIDTH*3+CUSHION*3, INNOV_SLOT_Y,
+                                                            INNOV_SLOT_WIDTH, INNOV_SLOT_HEIGHT))]
         self.discard_pile = []
         random.shuffle(self.deck)
         self.is_p1 = player_num % 2
@@ -731,16 +735,10 @@ class Player:
         if card.type != "basic" and card.type != "innovation":
             self.actions -= 1
 
-            print("taking action, current actions: " + str(self.actions))
+            # print("taking action, current actions: " + str(self.actions))
 
         self.power += card.power
         self.hand.remove(card)
-
-        if card.type == "innovation":
-            function = None  # this should be defined when the innovation is constructed
-            rect = (INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH, INNOV_SLOT_HEIGHT)
-            print(rect)
-            card.button = Button(rect, function, color=SLOT_COLOR, text=str(card))
 
         self.update_hand()  # since we removed a card from the hand, we need to update the visuals
 
@@ -775,7 +773,7 @@ class Player:
             curr_screen = "trash"
             screen_counter = num
 
-            print("starting trash")
+            # print("starting trash")
 
             c = 0
             for card in self.hand:
@@ -848,7 +846,7 @@ class Slot:
                     print(deck[i])
             if self.min <= card.cost <= self.max:
                 self.card = card
-                card.add(self)
+                card.add(self, card.buy)
                 added = True
                 deck.pop(c)
             else:
@@ -985,7 +983,7 @@ def fill_deck():
     for i in range(1):
         deck.append(MakeshiftBarrier())
 
-    for i in range(1):
+    for i in range(70):
         deck.append(Spyglass())
 
     for i in range(1):
@@ -1190,6 +1188,9 @@ def update():
         for slot in lineup:
             if slot.card is not None:
                 slot.card.button.update(screen)
+        for slot in curr_player.innov_list:
+            if slot.card is not None:
+                slot.card.button.update(screen)
         # print("current player: " + str(curr_player))
         for card in curr_player.hand:
             card.button.update(screen)
@@ -1224,7 +1225,7 @@ def update():
             if return_function is not None:
                 print("executing return function")
                 return_function()
-            print("returning to default screen")
+            # print("returning to default screen")
 
 
 # display text and buttons
