@@ -1,15 +1,20 @@
+import sys
 import pygame
 import os
 import random
 
 # define global final variables
+
+FPS = 30
+CLOCK = pygame.time.Clock()
+ACTIONS_PER_TURN = sys.maxsize
+HAND_SIZE = 5
+
+SCREEN_INPUTS = [500, 500]
 WIDTH = 1270  # screen width, height
 HEIGHT = 640
 WINDOW_OFFSET_X = 5
 WINDOW_OFFSET_Y = 30  # no idea why but this works
-FPS = 30
-CLOCK = pygame.time.Clock()
-SLOT_COLOR = (70, 0, 0)
 HAND_Y_LOC = 450
 HAND_CARD_DIMS = [150, 180]
 POWER_LOC = [1110, 600]
@@ -22,11 +27,27 @@ LINEUP_X_END = 1140
 SLOT_HEIGHT = 200
 SLOT_WIDTH = (LINEUP_X_END - LINEUP_X_START) / LINEUP_NUM
 CUSHION = 10
+START_BUTTON_DIMS = (0, 0, 350, 100)
 
-LOC_SLOT_HEIGHT = SLOT_HEIGHT
-LOC_SLOT_WIDTH = int(SLOT_WIDTH)
-LOC_SLOT_X = LINEUP_X_START
-LOC_SLOT_Y = LINEUP_Y + SLOT_HEIGHT + CUSHION
+SLOT_COLOR = (70, 0, 0)
+START_BUTTON_COLOR = (100, 30, 0)
+PASS_BUTTON_COLOR_A = (170, 150, 0)
+PASS_BUTTON_COLOR_B = (0, 180, 0)
+YES_BUTTON_COLOR = (0, 100, 0)
+NO_BUTTON_COLOR = (100, 0, 0)
+DISPLAY_DISCARD_COLOR = (169, 169, 169)
+
+TURN_CHANGE_FONT_SIZE = 80
+END_GAME_FONT_SIZE = 80
+TRASH_FONT_SIZE = 50
+DISCARD_FONT_SIZE = 50
+REPLACE_FONT_SIZE = 35
+POWER_FONT_SIZE = 32
+
+INNOV_SLOT_HEIGHT = SLOT_HEIGHT
+INNOV_SLOT_WIDTH = int(SLOT_WIDTH)
+INNOV_SLOT_X = LINEUP_X_START
+INNOV_SLOT_Y = LINEUP_Y + SLOT_HEIGHT + CUSHION
 
 SELECT_Y = 260
 SELECT_WIDTH = SLOT_WIDTH + 15
@@ -38,6 +59,8 @@ NO_RECT = (WIDTH - 125, 400, 125, 70)
 REPLACE_TEXT_LOC = [450, 360]
 DISCARD_TEXT_LOC = [420, 120]
 DISPLAY_DISCARD = [int(WIDTH * 1 / 12), int(HEIGHT * 1 / 8), int(WIDTH * 5 / 6), int(HEIGHT * 3 / 4)]
+
+END_GAME_TEXT_COUNTER = 70
 
 # global variables that might change
 global status, running  # status: home screen, game screen
@@ -171,7 +194,6 @@ class Button:
 
 # class holding basic information about a card. each card in the game will have a subclass of this.
 class Card:
-
     def __init__(self, card_type, cost, power, owned_by=None):
         self.type = card_type  # basic, action, innovation, etc
         self.cost = cost  # how much energy this card costs
@@ -214,10 +236,10 @@ class Card:
 
     # add this card to a slot in the lineup.
     # called from the slot.add_card function.
-    def add(self, slot):
+    def add(self, slot, func=buy):
         self.slot = slot
         # create a new button which will cause the player to buy this card when it is clicked on
-        self.button = Button(slot.rect, self.buy, color=SLOT_COLOR, text=str(self))
+        self.button = Button(slot.rect, func, color=SLOT_COLOR, text=str(self))
 
     # everything was handled in the player draw function
     def draw(self, hand_size):
@@ -251,9 +273,10 @@ class Card:
         if self.type == "innovation":
             empty_slot = False
             # find an empty slot to put the innovation
-            for slot in self.player.loc_list:
+            for slot in self.player.innov_list:
                 if slot.card is None:
                     slot.card = self
+                    self.add(slot, func=self.ability)
                     empty_slot = True
                     break
 
@@ -304,6 +327,25 @@ class Card:
         # decrement the "number of cards to be trashed"
         screen_counter -= 1
 
+    # some innovations will overwrite this
+    def ability(self):
+        pass
+
+    # some innovations will overwrite this
+    def passive(self):
+        pass
+
+    def destroy(self):
+        self.slot.card = None
+        self.button = None
+
+
+class Innovation(Card):
+    def __init__(self, cost, ability, passive):
+        super().__init__("innovation", cost, 0)
+        self.ability = ability
+        self.passive = passive
+
 
 # basic card that starts in the player's hand
 # card text: {no effect}
@@ -342,7 +384,7 @@ class Catalyst(Card):
 
 # action card, costs 2 energy.
 # card text: Draw a card.
-# You may trash an action or location in your hand or discard pile. If you do, draw 2 additional cards.
+# You may trash an action or innovation in your hand or discard pile. If you do, draw 2 additional cards.
 class Sacrifice(Card):
     def __init__(self):
         super().__init__("action", 2, 0)
@@ -436,13 +478,24 @@ class MakeshiftBarrier(Card):
     # todo: implement defenses
 
 
-# location card, costs 2 energy.
+# innovation card, costs 2 energy.
 # card text:
 # You may look at and buy the top card of the main deck.
-# Destroy this location to draw a card.
-class Spyglass(Card):
+# Destroy this innovation to draw a card.
+class Spyglass(Innovation
+               ):
     def __init__(self):
-        super().__init__("innovation", 2, 0)
+        super().__init__(2, self.ability, self.passive)
+
+    def take_effect(self):
+        pass
+
+    def ability(self):
+        self.destroy()
+        self.player.draw_card()
+
+    def passive(self):
+        pass
 
 
 # action card, costs 2 energy.
@@ -525,22 +578,25 @@ class Player:
                      Crystal(self), Crystal(self), Crystal(self), Crystal(self),
                      Crystal(self), Crystal(self), Crystal(self)]
 
-        # list of slots that can contain locations.
-        self.loc_list = [Slot(0, 100, pygame.Rect(LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT)),
-                         Slot(0, 100, pygame.Rect(LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT)),
-                         Slot(0, 100, pygame.Rect(LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT))]
+        # list of slots that can contain innovations.
+        self.innov_list = [Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
+                            INNOV_SLOT_HEIGHT)),
+                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
+                            INNOV_SLOT_HEIGHT)),
+                           Slot(0, sys.maxsize, pygame.Rect(INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH,
+                            INNOV_SLOT_HEIGHT))]
         self.discard_pile = []
         random.shuffle(self.deck)
         self.is_p1 = player_num % 2
 
         # draw a 5 card starting hand
-        for c in range(5):
+        for c in range(HAND_SIZE):
             self.draw_card()
 
         self.power = 0
         self.opponent = None
 
-        self.actions_per_turn = 2  # number of actions per turn (default: 2)
+        self.actions_per_turn = ACTIONS_PER_TURN  # number of actions per turn (default: 2)
         self.actions = self.actions_per_turn  # number of actions currently available
 
         self.discard_pile_top = None  # top card of the discard pile, which is shown at all times
@@ -631,7 +687,7 @@ class Player:
         self.power = 0
 
         # draw a new hand of 5
-        while len(self.hand) < 5:
+        while len(self.hand) < HAND_SIZE:
             self.draw_card()
 
         if len(deck) == 0:
@@ -682,7 +738,7 @@ class Player:
 
         if card.type == "innovation":
             function = None  # this should be defined when the innovation is constructed
-            rect = (LOC_SLOT_X, LOC_SLOT_Y, LOC_SLOT_WIDTH, LOC_SLOT_HEIGHT)
+            rect = (INNOV_SLOT_X, INNOV_SLOT_Y, INNOV_SLOT_WIDTH, INNOV_SLOT_HEIGHT)
             print(rect)
             card.button = Button(rect, function, color=SLOT_COLOR, text=str(card))
 
@@ -766,12 +822,12 @@ class Slot:
             min_text = "no minimum"
         else:
             min_text = "min cost: " + str(self.min) + "\n"
-        if self.max == 100:
+        if self.max == sys.maxsize:
             max_text = "no maximum"
         else:
             max_text = "max cost: " + str(self.max) + "\n"
 
-        return "Slot\n" + min_text + max_text
+        return "Slot: \n" + min_text + "; " + max_text
 
     def remove(self):
         self.card = None
@@ -833,14 +889,14 @@ def end_game():
     else:
         game_winner = "2"
 
-    end_game_text_counter = 70
+    end_game_text_counter = END_GAME_TEXT_COUNTER
 
 
 # called from initialize
 def create_screen():
     global screen
 
-    screen = pygame.display.set_mode([500, 500])
+    screen = pygame.display.set_mode(SCREEN_INPUTS)
     screen.fill((0, 0, 0))
 
 
@@ -849,7 +905,7 @@ def create_start_button():
     global start_button
 
     # button you click to start the game
-    start_button = Button((0, 0, 350, 100), start_game, color=(100, 30, 0), text="Play!")
+    start_button = Button(START_BUTTON_DIMS, start_game, color=START_BUTTON_COLOR, text="Play!")
     start_button.rect.center = (screen.get_rect().centerx, screen.get_rect().centery)
 
 
@@ -963,10 +1019,10 @@ def init_buttons():
     global no_button
 
     # button to pass the turn
-    pass_button = Button(END_TURN_RECT, end_turn, color=(100, 70, 0), text="End Turn")
+    pass_button = Button(END_TURN_RECT, end_turn, color=PASS_BUTTON_COLOR_A, text="End Turn")
     # these buttons appear when asked to replace the lineup
-    yes_button = Button(YES_RECT, yes_replace, color=(0, 100, 0), text="yes")
-    no_button = Button(NO_RECT, new_turn, color=(100, 0, 0), text="no")
+    yes_button = Button(YES_RECT, yes_replace, color=YES_BUTTON_COLOR, text="Yes")
+    no_button = Button(NO_RECT, new_turn, color=NO_BUTTON_COLOR, text="No")
 
 
 def start_game():
@@ -993,8 +1049,8 @@ def start_game():
 
     random.shuffle(deck)
 
-    fill_lineup()
     create_slots()
+    fill_lineup()
     init_buttons()
 
     # randomly determine starting player
@@ -1146,9 +1202,9 @@ def update():
 
         if (not curr_player.hand) and curr_player.power == 0:
             # change this condition
-            pass_button.color = (0, 180, 0)
+            pass_button.color = PASS_BUTTON_COLOR_B
         else:
-            pass_button.color = (170, 150, 0)
+            pass_button.color = PASS_BUTTON_COLOR_A
 
         pass_button.update(screen)
 
@@ -1185,14 +1241,14 @@ def draw():
         start_button.draw()
 
     if status == "game":
-        power_font = pygame.font.Font('freesansbold.ttf', 32)
+        power_font = pygame.font.Font('freesansbold.ttf', POWER_FONT_SIZE)
         text = power_font.render("Power: " + str(curr_player.power), True, pygame.Color('White'))
         screen.blit(text, POWER_LOC)
 
         for slot in lineup:
             if slot.card is not None:
                 slot.card.button.draw()
-        for slot in curr_player.loc_list:
+        for slot in curr_player.innov_list:
             if slot.card is not None:
                 slot.card.button.draw()
         for card in curr_player.hand:
@@ -1203,8 +1259,8 @@ def draw():
         pass_button.draw()
 
         if end_game_text_counter > 0:
-            turn_change_font = pygame.font.Font('freesansbold.ttf', 80)
-            text = turn_change_font.render("Player " + game_winner + " Wins!", True, pygame.Color('White'))
+            end_game_font = pygame.font.Font('freesansbold.ttf', END_GAME_FONT_SIZE)
+            text = end_game_font.render("Player " + game_winner + " Wins!", True, pygame.Color('White'))
             screen.blit(text, TURN_CHANGE_LOC)
 
         elif turn_change_text_counter > 0:
@@ -1212,7 +1268,7 @@ def draw():
                 player_num = '1'
             else:
                 player_num = '2'
-            turn_change_font = pygame.font.Font('freesansbold.ttf', 80)
+            turn_change_font = pygame.font.Font('freesansbold.ttf', TURN_CHANGE_FONT_SIZE)
             text = turn_change_font.render("Player " + player_num + " Turn", True, pygame.Color('White'))
             screen.blit(text, TURN_CHANGE_LOC)
 
@@ -1220,7 +1276,7 @@ def draw():
         if curr_screen == "replace":
             yes_button.draw()
             no_button.draw()
-            replace_font = pygame.font.Font('freesansbold.ttf', 35)
+            replace_font = pygame.font.Font('freesansbold.ttf', REPLACE_FONT_SIZE)
             text = replace_font.render("Replace this lineup?", True, pygame.Color('White'))
             screen.blit(text, REPLACE_TEXT_LOC)
 
@@ -1228,7 +1284,7 @@ def draw():
             screen.fill((100, 100, 100, 100), special_flags=pygame.BLEND_ADD)
 
         if curr_screen == "discard":
-            discard_font = pygame.font.Font('freesansbold.ttf', 50)
+            discard_font = pygame.font.Font('freesansbold.ttf', DISCARD_FONT_SIZE)
             if screen_counter >= 2:
                 discard_text = "Discard " + str(screen_counter) + " cards:"
             else:
@@ -1245,7 +1301,7 @@ def draw():
 
         # TODO: change to a may
         if curr_screen == "trash":
-            trash_font = pygame.font.Font('freesansbold.ttf', 50)
+            trash_font = pygame.font.Font('freesansbold.ttf', TRASH_FONT_SIZE)
             if screen_counter >= 2:
                 trash_text = "Trash " + str(screen_counter) + " cards:"
             else:
@@ -1258,7 +1314,7 @@ def draw():
                     card.select_button.draw()
 
         if display_discard:
-            pygame.draw.rect(screen, (169, 169, 169), DISPLAY_DISCARD)
+            pygame.draw.rect(screen, DISPLAY_DISCARD_COLOR, DISPLAY_DISCARD)
 
             # display the cards in the discard pile
             select_index = [DISPLAY_DISCARD[0] + CUSHION, DISPLAY_DISCARD[1] + CUSHION]
